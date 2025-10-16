@@ -1,0 +1,12 @@
+https://api.groq.com/openai/v1/audio/translations
+
+model - whisper-large-v3
+file - file.mpeg
+
+output
+{
+    "text": " There are 12 members in the electric team. I know that Vinoth, Vijay Bhaskar, Sudhaher, Shanawala Sharif have not taken any assignments yet. So, you four together, make the remaining 12 members. One person can make three members. Plus, we have to support the mechanical team. I have given the numbers of all the mechanical team members you know. If you have, you can contact them. It is not necessary to contact only electrically. You can contact both mechanical and civil. If you have good friends, you can contact them voluntarily and collect the fund. Thank you so much. The assignment task is, let's try to close by maximum tomorrow. We have to do the total assignment by tomorrow. And then we can contact the individuals and discuss it. Thank you so much.",
+    "x_groq": {
+        "id": "req_01k7ns36gcfsmsn36hr6s7qjpa"
+    }
+}
