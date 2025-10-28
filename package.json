@@ -1,0 +1,22 @@
+{
+  "name": "user-story-to-tests",
+  "version": "1.0.0",
+  "description": "Full-stack application that converts user stories into test cases using LLM integration",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "install:all": "npm install",
+    "dev": "concurrently \"npm run dev --workspace=backend\" \"npm run dev --workspace=frontend\"",
+    "build": "npm run build --workspaces",
+    "typecheck": "npm run typecheck --workspaces"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "dependencies": {
+    "jira-client": "^8.2.2"
+  }
+}
