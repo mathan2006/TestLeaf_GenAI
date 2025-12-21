@@ -210,9 +210,9 @@ router.get("/health", (req: Request, res: Response) => {
  * {
  *   query?: string - the input question (required for answer_relevancy),
  *   output?: string - the response to evaluate (required for most metrics),
- *   context?: string | string[] - context for faithfulness evaluation,
- *   expected_output?: string - reference answer (for contextual_* metrics),
- *   messages?: Array<{role: string, content: string}> - conversation turns (required for conversation_completeness),
+ *   context?: string | string[] - retrieved context for evaluation,
+ *   expected_output?: string - expected answer for contextual metrics,
+ *   messages?: array - list of {role, content} for conversation_completeness,
  *   metric?: string (optional, defaults to 'answer_relevancy')
  * }
  *
@@ -222,24 +222,71 @@ router.get("/health", (req: Request, res: Response) => {
  *   output?: string,
  *   context?: string[],
  *   expected_output?: string,
- *   messages?: Array<{role: string, content: string}>,
+ *   messages?: array,
  *   evaluation: { metric, score, explanation }
  * }
  */
 router.post(
   "/eval-only",
   asyncHandler(async (req: Request, res: Response) => {
-    const { query, output, context, expected_output, metric, messages } = req.body;
+    const { query, output, context, retrieval_context, expected_output, metric, messages } = req.body;
+
+    // Unify context and retrieval_context fields (retrieval_context is alias for backward compatibility)
+    const unifiedContext = context || retrieval_context;
 
     // Validation
-    if (!output && !messages) {
-      return res.status(400).json({
-        error: "Missing required field: output or messages (for conversation_completeness)"
-      });
-    }
-
-    // Determine effective metric
     const effectiveMetric = metric || "answer_relevancy";
+    if (effectiveMetric === "contextual_recall" || effectiveMetric === "contextual_precision") {
+      if (!expected_output) {
+        return res.status(400).json({
+          error: "Missing required field: expected_output for " + effectiveMetric
+        });
+      }
+      if (!unifiedContext) {
+        return res.status(400).json({
+          error: "Missing required field: context (or retrieval_context) for " + effectiveMetric
+        });
+      }
+    } else if (effectiveMetric === "pii_leakage") {
+      if (!query) {
+        return res.status(400).json({
+          error: "Missing required field: query for pii_leakage"
+        });
+      }
+      if (!output) {
+        return res.status(400).json({
+          error: "Missing required field: output for pii_leakage"
+        });
+      }
+    } else if (effectiveMetric === "hallucination") {
+      if (!query) {
+        return res.status(400).json({
+          error: "Missing required field: query for hallucination"
+        });
+      }
+      if (!unifiedContext) {
+        return res.status(400).json({
+          error: "Missing required field: context (or retrieval_context) for hallucination"
+        });
+      }
+      if (!output) {
+        return res.status(400).json({
+          error: "Missing required field: output for hallucination"
+        });
+      }
+    } else if (effectiveMetric === "conversation_completeness") {
+      if (!messages) {
+        return res.status(400).json({
+          error: "Missing required field: messages for conversation_completeness"
+        });
+      }
+    } else {
+      if (!output) {
+        return res.status(400).json({
+          error: "Missing required field: output"
+        });
+      }
+    }
 
     // Build evaluation parameters based on what's provided
     const evalParams: any = {
@@ -247,36 +294,20 @@ router.post(
       provider: "groq"
     };
 
-    // Add output if provided (required for most metrics)
-    if (output) {
-      evalParams.output = output;
-    }
-
-    // Add query if provided
-    if (query) {
-      evalParams.query = query;
-    }
-
-    // Add context if provided (convert string to array if needed)
-    if (context) {
-      evalParams.context = Array.isArray(context) ? context : [context];
-    }
-
-    // Add expected_output if provided
-    if (expected_output) {
-      evalParams.expected_output = expected_output;
-    }
-
-    // Add messages if provided (for conversation_completeness)
-    if (messages) {
-      evalParams.messages = messages;
-    }
+    // Always add available fields regardless of metric type
+    // This allows metric="all" to work with all necessary fields for each metric
+    if (output) evalParams.output = output;
+    if (query) evalParams.query = query;
+    if (unifiedContext) evalParams.retrieval_context = Array.isArray(unifiedContext) ? unifiedContext : [unifiedContext];
+    if (expected_output) evalParams.expected_output = expected_output;
+    if (messages) evalParams.messages = messages;
 
     console.log(`Direct evaluation - Metric: ${effectiveMetric}`);
     if (query) console.log(`Query: ${query}`);
-    if (context) console.log(`Context: ${Array.isArray(context) ? context.length + ' items' : context.substring(0, 100) + '...'}`);
+    if (unifiedContext) console.log(`Context: ${Array.isArray(unifiedContext) ? unifiedContext.length + ' items' : unifiedContext.substring(0, 100) + '...'}`);
+    if (expected_output) console.log(`Expected Output: ${expected_output.substring(0, 100)}...`);
     if (output) console.log(`Output: ${output.substring(0, 100)}...`);
-    if (messages) console.log(`Messages: ${messages.length} conversation turns`);
+    if (messages) console.log(`Messages: ${messages.length} turns`);
 
     // Evaluate using specified metric (no LLM generation needed)
     const evalResult = await evalWithFields(evalParams);
@@ -294,7 +325,7 @@ router.post(
     // Include optional fields in response if they were provided
     if (output) response.output = output;
     if (query) response.query = query;
-    if (context) response.context = evalParams.context;
+    if (unifiedContext) response.context = Array.isArray(unifiedContext) ? unifiedContext : [unifiedContext];
     if (expected_output) response.expected_output = expected_output;
     if (messages) response.messages = messages;
 
@@ -316,15 +347,13 @@ router.get("/metrics", async (req: Request, res: Response) => {
       ...metricsInfo,
       usage_examples: {
         faithfulness: "Measures alignment with provided context - ideal for RAG systems",
-        answer_relevancy: "Measures how well the answer addresses the question - good for QA systems", 
-        contextual_precision: "Measures precision of retrieved context - useful for retrieval evaluation",
-        contextual_recall: "Measures coverage of expected information - helpful for completeness checking"
+        answer_relevancy: "Measures how well the answer addresses the question - good for QA systems"
       }
     });
   } catch (error) {
     res.status(500).json({
       error: "Could not fetch metrics information",
-      available_metrics: ["faithfulness", "answer_relevancy", "contextual_precision", "contextual_recall"]
+      available_metrics: ["faithfulness", "answer_relevancy"]
     });
   }
 });
